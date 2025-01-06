@@ -16,80 +16,54 @@
 
     class TextReplacer {
         constructor(rules = []) {
-            this.rules = rules.filter(rule => rule.enable);
-            this.compiledRules = this.compileRules();
-            this.observer = null;
+            this.rules = rules.filter(rule => rule.enable).map(({ oldWord, newWord, caseSensitive }) => ({
+                regex: new RegExp(this.escapeRegExp(oldWord), caseSensitive ? 'g' : 'gi'),
+                newWord
+            }));
         }
 
         escapeRegExp(string) {
             return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         }
 
-        compileRules() {
-            return this.rules.map(({ oldWord, newWord, caseSensitive }) => {
-                const regex = new RegExp(this.escapeRegExp(oldWord), caseSensitive ? 'g' : 'gi');
-                return { regex, newWord };
-            });
-        }
-
         replaceText(text) {
-            let result = text;
-            for (const { regex, newWord } of this.compiledRules) {
-                result = result.replace(regex, newWord);
-            }
-            return result;
+            return this.rules.reduce((result, { regex, newWord }) => result.replace(regex, newWord), text);
         }
 
         processNode(node) {
             if (node.nodeType === Node.TEXT_NODE && node.textContent.trim()) {
-                const originalText = node.textContent;
-                const replacedText = this.replaceText(originalText);
-                if (originalText !== replacedText) {
-                    node.textContent = replacedText;
-                }
+                const replacedText = this.replaceText(node.textContent);
+                if (node.textContent !== replacedText) node.textContent = replacedText;
             } else if (
                 node.nodeType === Node.ELEMENT_NODE &&
-                    !['SCRIPT', 'STYLE', 'TEXTAREA'].includes(node.tagName)
+                !['SCRIPT', 'STYLE', 'TEXTAREA'].includes(node.tagName)
             ) {
-                const children = Array.from(node.childNodes);
-                for (let i = 0, len = children.length; i < len; i++) {
-                    this.processNode(children[i]);
+                const childNodes = node.childNodes;
+                for (let i = 0, len = childNodes.length; i < len; i++) {
+                    this.processNode(childNodes[i]);
                 }
             }
         }
 
-        startObserving() {
-            this.observer = new MutationObserver(mutations => {
-                const nodesToProcess = new Set();
-                mutations.forEach(({ addedNodes }) => {
-                    for (let i = 0, len = addedNodes.length; i < len; i++) {
-                        nodesToProcess.add(addedNodes[i]);
+        observeMutations() {
+            const observer = new MutationObserver(mutations => {
+                for (let i = 0, len = mutations.length; i < len; i++) {
+                    const addedNodes = mutations[i].addedNodes;
+                    for (let j = 0, nodeLen = addedNodes.length; j < nodeLen; j++) {
+                        this.processNode(addedNodes[j]);
                     }
-                });
-
-                nodesToProcess.forEach(node => this.processNode(node));
+                }
             });
-
-            this.observer.observe(document.body, {
-                childList: true,
-                subtree: true
-            });
+            observer.observe(document.body, { childList: true, subtree: true });
         }
 
         init() {
             try {
                 this.processNode(document.body);
-                this.startObserving();
-                return true;
+                this.observeMutations();
             } catch (error) {
-                console.error('TextReplacer initialization failed:', error || 'Unknown Error');
-                return false;
+                console.error('TextReplacer initialization failed:', error);
             }
-        }
-
-        dispose() {
-            this.observer?.disconnect();
-            this.observer = null;
         }
     }
 
@@ -106,4 +80,3 @@
         initialize();
     }
 })();
-
